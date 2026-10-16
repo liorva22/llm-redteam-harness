@@ -1,0 +1,78 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Red-Team Dashboard</title>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+<style>
+  :root { --bg:#f5f6f8; --card:#fff; --text:#1c2230; --muted:#687085; --line:#e2e5eb; --bad:#c0392b; --good:#1a7f4b; --warn:#b7791f; }
+  * { box-sizing:border-box; }
+  body { margin:0; font:14px/1.45 system-ui, -apple-system, Segoe UI, Roboto, sans-serif; background:var(--bg); color:var(--text); }
+  header { padding:16px 24px; background:var(--card); border-bottom:1px solid var(--line); display:flex; gap:16px; align-items:baseline; flex-wrap:wrap; }
+  h1 { font-size:18px; margin:0; } h2 { font-size:15px; margin:0 0 10px; } .muted { color:var(--muted); }
+  main { padding:20px 24px; display:grid; grid-template-columns:1fr 1fr; gap:16px; max-width:1400px; }
+  .card { background:var(--card); border:1px solid var(--line); border-radius:10px; padding:16px; min-width:0; }
+  .wide { grid-column:1 / -1; }
+  .kpis { display:flex; gap:12px; flex-wrap:wrap; } .kpi { flex:1; min-width:140px; }
+  .kpi b { display:block; font-size:22px; } .kpi span { color:var(--muted); font-size:12px; }
+  table { width:100%; border-collapse:collapse; font-size:13px; } th, td { text-align:left; padding:6px 8px; border-bottom:1px solid var(--line); vertical-align:top; }
+  th { color:var(--muted); font-weight:600; } td:nth-child(2) { white-space:nowrap; }
+  .tag { display:inline-block; padding:1px 8px; border-radius:10px; font-size:12px; font-weight:600; white-space:nowrap; }
+  .breach { background:#fde8e6; color:var(--bad); } .fp { background:#fdf3e1; color:var(--warn); } .blocked { background:#e5f4ec; color:var(--good); }
+  @media (max-width:900px) { main { grid-template-columns:1fr; padding:16px; } }
+</style>
+</head>
+<body>
+<header><h1>Guardrail &amp; Red-Team Dashboard</h1><span class="muted" id="meta"></span></header>
+<main>
+  <section class="card wide"><div class="kpis" id="kpis"></div></section>
+  <section class="card"><h2>Attempts vs blocked vs succeeded, by category (full guardrail stack)</h2><canvas id="byCat" height="230"></canvas></section>
+  <section class="card"><h2>Attack success rate by guardrail configuration</h2><canvas id="ablation" height="230"></canvas></section>
+  <section class="card wide"><h2>Incident log</h2><table id="incidents"></table></section>
+</main>
+<script>
+const $ = (id) => document.getElementById(id);
+const pct = (x) => (x * 100).toFixed(1) + "%";
+const esc = (s) => String(s ?? "").replace(/[&<>"]/g, (c) => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+const CATS = ["prompt_injection", "jailbreak", "pii_leak", "indirect_injection"];
+
+(async () => {
+  const runs = await (await fetch("/api/runs")).json();
+  if (!runs.length) { $("meta").textContent = "No replay runs yet: run `python -m redteam.replay`."; return; }
+  const run = runs[0], s = run.summary.configs, full = s.full;
+  $("meta").textContent = `run #${run.id} · suite ${run.suite_name} v${run.suite_version} · ${run.mode} mode · target ${run.target} · classifier ${run.classifier} · ${new Date(run.created_at).toLocaleString()}`;
+  const adv = CATS.reduce((n, c) => n + full[c].attempts, 0);
+  $("kpis").innerHTML = `
+    <div class="kpi"><b class="${full.overall.attack_success_rate > 0 ? "" : ""}">${pct(full.overall.attack_success_rate)}</b><span>attack success rate, full stack (${adv} attacks)</span></div>
+    <div class="kpi"><b>${s.none ? pct(s.none.overall.attack_success_rate) : "–"}</b><span>ASR with no guardrails</span></div>
+    <div class="kpi"><b>${pct(full.overall.false_negative_rate)}</b><span>attacks no layer flagged (FNR)</span></div>
+    <div class="kpi"><b>${pct(full.overall.false_positive_rate)}</b><span>benign requests refused (FPR, n=${full.benign.attempts})</span></div>
+    <div class="kpi"><b>${full.overall.latency_ms_p50.toFixed(1)} ms</b><span>p50 guardrail + target latency</span></div>`;
+
+  new Chart($("byCat"), { type: "bar", data: { labels: CATS, datasets: [
+    { label: "attempts", data: CATS.map((c) => full[c].attempts), backgroundColor: "#b8c4d9" },
+    { label: "blocked", data: CATS.map((c) => full[c].blocked), backgroundColor: "#1a7f4b" },
+    { label: "succeeded", data: CATS.map((c) => full[c].succeeded), backgroundColor: "#c0392b" },
+  ] } });
+
+  // jsonb doesn't preserve key order, so fix it: weakest -> strongest stack, red -> green.
+  const configs = ["none", "rules", "rules+classifier", "full"].filter((c) => s[c]);
+  const colors = ["#c0392b", "#e67e22", "#2f5bea", "#1a7f4b"];
+  new Chart($("ablation"), { type: "bar", data: { labels: [...CATS, "benign FPR"], datasets: configs.map((c, i) => ({
+    label: c, backgroundColor: colors[i % colors.length],
+    data: [...CATS.map((k) => s[c][k].asr), s[c].overall.false_positive_rate],
+  })) }, options: { scales: { y: { min: 0, max: 1, ticks: { callback: (v) => v * 100 + "%" } } } } });
+
+  const attempts = await (await fetch(`/api/runs/${run.id}/attempts?config=full`)).json();
+  const outcome = (a) => a.category === "benign" ? (a.blocked ? "fp" : null) : a.succeeded ? "breach" : a.blocked ? "blocked" : null;
+  const order = { breach: 0, fp: 1, blocked: 2 };
+  const rows = attempts.map((a) => ({ ...a, o: outcome(a) })).filter((a) => a.o).sort((a, b) => order[a.o] - order[b.o]);
+  const label = { breach: "BREACH", fp: "FALSE POSITIVE", blocked: "BLOCKED" };
+  $("incidents").innerHTML = "<tr><th>outcome</th><th>case</th><th>category</th><th>caught by</th><th>input</th><th>final response</th></tr>" +
+    rows.map((a) => `<tr><td><span class="tag ${a.o}">${label[a.o]}</span></td><td>${a.case_id}</td><td>${a.category}</td>
+      <td>${esc(a.blocked_by ?? "–")}</td><td>${esc(a.input).slice(0, 170)}</td><td>${esc(a.response).slice(0, 120)}</td></tr>`).join("");
+})();
+</script>
+</body>
+</html>
