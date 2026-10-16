@@ -1,0 +1,27 @@
+name: Nightly red-team replay
+on:
+  schedule:
+    - cron: "17 3 * * *"   # 03:17 UTC every night
+  workflow_dispatch:
+
+jobs:
+  replay:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install .
+      # Live replay against Claude when the repo has an API key secret; otherwise the deterministic mock.
+      - name: Replay suite (fails if the full stack exceeds MAX_ASR / MAX_FPR)
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+        run: |
+          if [ -n "$ANTHROPIC_API_KEY" ]; then export MOCK_MODE=0; else export MOCK_MODE=1; fi
+          python -m redteam.replay
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: replay-results
+          path: results/

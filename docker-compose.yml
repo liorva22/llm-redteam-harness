@@ -1,0 +1,42 @@
+x-app: &app
+  build: .
+  environment:
+    MOCK_MODE: ${MOCK_MODE:-1}
+    ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+    TARGET_MODEL: ${TARGET_MODEL:-claude-haiku-5-5}
+    CLASSIFIER_MODEL: ${CLASSIFIER_MODEL:-claude-haiku-5-5}
+    DATABASE_URL: postgresql://redteam:redteam@db:5432/redteam
+  depends_on:
+    db:
+      condition: service_healthy
+
+services:
+  db:
+    image: pgvector/pgvector:pg16
+    environment:
+      POSTGRES_USER: redteam
+      POSTGRES_PASSWORD: redteam
+      POSTGRES_DB: redteam
+    ports:
+      - "127.0.0.1:${DB_PORT:-5435}:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U redteam"]
+      interval: 2s
+      retries: 30
+
+  # Guarded target app (POST /chat) + dashboard (GET /)
+  app:
+    <<: *app
+    ports:
+      - "${API_PORT:-8103}:8000"
+
+  # One-shot replay of the attack suite; results land in Postgres and show up on the dashboard.
+  replay:
+    <<: *app
+    command: ["python", "-m", "redteam.replay"]
+    restart: "no"
+
+volumes:
+  pgdata:
