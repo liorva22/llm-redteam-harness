@@ -1,0 +1,17 @@
+flowchart LR
+    suite[(suites/v1.json<br/>versioned attack + benign cases)] --> replay[Replay harness<br/>per guardrail config]
+    nightly([Nightly GitHub Action<br/>cron 03:17 UTC]) --> replay
+    user([User]) -->|POST /chat| guard
+    replay --> guard
+    subgraph guard[Guardrail pipeline]
+        rules[1 Input rules<br/>regex] --> clf[2 Input classifier<br/>Claude Haiku / local TF-IDF]
+        clf --> scrub[3 PII scrubber<br/>email, phone, SSN, card]
+    end
+    scrub --> target[Target: AcmeHR assistant<br/>system prompt + canary + fake directory]
+    target -->|live| haiku[(claude-haiku-5-5)]
+    target -.->|MOCK_MODE=1| worst[Worst-case mock<br/>complies with every attack]
+    target --> out[4 Output filter<br/>canary / prompt-shingle / known-PII DLP]
+    out --> resp[Final response]
+    resp --> oracle{Oracle<br/>canary, PII digits, marker}
+    oracle --> pg[(Postgres<br/>replay_runs, attempts)]
+    pg --> dash[Dashboard<br/>attempts vs blocked, ASR by config, incident log]
