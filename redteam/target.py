@@ -70,6 +70,7 @@ class ClaudeTarget:
         import anthropic
 
         self.client = anthropic.Anthropic()
+        self.usage = [0, 0]
 
     def respond(self, user_input: str, document: str | None = None, sim_goal: dict | None = None) -> Reply:
         t0 = time.perf_counter()
@@ -80,6 +81,8 @@ class ClaudeTarget:
             messages=[{"role": "user", "content": user_message(user_input, document)}],
             output_config={"effort": "low"},
         )
+        self.usage[0] += resp.usage.input_tokens
+        self.usage[1] += resp.usage.output_tokens
         text = "".join(b.text for b in resp.content if b.type == "text")
         if resp.stop_reason == "refusal":
             text = text or "[model refused]"

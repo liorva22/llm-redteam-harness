@@ -15,7 +15,7 @@ import sys
 from collections import defaultdict
 from pathlib import Path
 
-from .guards import ClaudeClassifier, make_classifier
+from .guards import make_classifier
 from .oracle import attack_succeeded
 from .pipeline import CONFIGS, handle
 from .target import make_target
@@ -99,10 +99,9 @@ def main(argv=None) -> int:
                 }
             )
 
-    cost = 0.0
-    if isinstance(classifier, ClaudeClassifier):
-        cost += (classifier.usage[0] * HAIKU_PRICE[0] + classifier.usage[1] * HAIKU_PRICE[1]) / 1e6
-    # ponytail: target token usage isn't tracked per call yet; add it to Reply accounting if live runs get big.
+    cost = sum(
+        (m.usage[0] * HAIKU_PRICE[0] + m.usage[1] * HAIKU_PRICE[1]) / 1e6 for m in (target, classifier) if hasattr(m, "usage")
+    )
 
     report = {
         "suite": {"name": suite["name"], "version": suite["version"], "cases": len(suite["cases"])},

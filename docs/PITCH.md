@@ -23,9 +23,8 @@ The harness replays `suites/v1.json` under four configurations (none, rules, rul
 - **Postgres + a static dashboard + GitHub Actions cron.** No new infrastructure beyond the database.
 
 ## What I'd do differently
-- **Live numbers.** No API key was available, so the reported figures are mock-mode figures. The real question, how often Claude Haiku *itself* resists these attacks with and without guardrails, is one `MOCK_MODE=0` run away.
-- **Independent, larger, adaptive attacks.** I wrote both the rules and the suite, which biases the rule layer optimistically. Next steps: a held-out suite written by someone else, an attacker LLM that mutates failed attacks, multi-turn attacks, and encoding tricks (base64, homoglyphs).
-- **Indirect injection is the weak spot** (20% ASR): AI-addressed text without a trigger phrase ("Translator AI:", hidden `<span>`, `[[SYSTEM]]`). Fixes worth trying: strip hidden HTML, run a document-specific classifier, and isolate documents structurally, e.g. a separate tool result rather than inline text.
+- **Harder, independent attacks.** Live, Claude Haiku resisted all but one attack (a partial jailbreak) even without guardrails, and the full stack reached 0% ASR at 0% FPR ($0.04 per replay). The first live run also exposed an oracle bug, where refusals quoting the marker were counted as breaches. I also wrote both the rules and the suite. Next steps: a held-out suite written by someone else, an attacker LLM that mutates failed attacks, multi-turn attacks, and encoding tricks.
+- **Indirect injection is the guardrails' weak spot** (20% ASR against the worst-case mock): AI-addressed text without a trigger phrase ("Translator AI:", hidden `<span>`, `[[SYSTEM]]`). Fixes worth trying: strip hidden HTML, run a document-specific classifier, and isolate documents structurally, e.g. a separate tool result rather than inline text.
 - **Cost of the classifier.** One Haiku call per request adds latency and money. A cheaper approach is to run it only when the rules are inconclusive or a document is attached.
 
 ## Interview talking points
